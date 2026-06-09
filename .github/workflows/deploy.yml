@@ -1,0 +1,46 @@
+name: Deploy Lambda
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    # Checkout code
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    # Configure AWS
+    - name: Configure AWS
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ap-south-1
+
+    # Build zip package
+    - name: Build deployment package
+      run: |
+        zip -r package.zip lambda_function.py
+
+    # Deploy to Lambda
+    - name: Update Lambda function
+      run: |
+        aws lambda update-function-code \
+          --function-name YOUR_LAMBDA_NAME \
+          --zip-file fileb://package.zip
+
+    # Smoke test (optional)
+    - name: Smoke Test
+      run: |
+        aws lambda invoke \
+          --function-name YOUR_LAMBDA_NAME \
+          --payload '{"bucket":"test","file":"test.csv"}' \
+          response.json
+
+        cat response.json
