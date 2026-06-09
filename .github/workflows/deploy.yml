@@ -5,42 +5,57 @@ on:
     branches:
       - main
 
+env:
+  AWS_REGION: ap-south-1
+  LAMBDA_FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
+      # Checkout source code
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    # Checkout code
-    - name: Checkout
-      uses: actions/checkout@v3
+      # Configure AWS credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    # Configure AWS
-    - name: Configure AWS
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ap-south-1
+      # Create deployment package
+      - name: Build Lambda package
+        run: |
+          zip -r package.zip lambda_function.py
 
-    # Build zip package
-    - name: Build deployment package
-      run: |
-        zip -r package.zip lambda_function.py
+      # Verify Lambda exists
+      - name: Verify Lambda Function
+        run: |
+          aws lambda get-function \
+            --function-name "$LAMBDA_FUNCTION_NAME"
 
-    # Deploy to Lambda
-    - name: Update Lambda function
-      run: |
-        aws lambda update-function-code \
-          --function-name YOUR_LAMBDA_NAME \
-          --zip-file fileb://package.zip
+      # Deploy Lambda
+      - name: Update Lambda Function Code
+        run: |
+          aws lambda update-function-code \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --zip-file fileb://package.zip
 
-    # Smoke test (optional)
-    - name: Smoke Test
-      run: |
-        aws lambda invoke \
-          --function-name YOUR_LAMBDA_NAME \
-          --payload '{"bucket":"test","file":"test.csv"}' \
-          response.json
+      # Wait for update to finish
+      - name: Wait for Lambda update
+        run: |
+          aws lambda wait function-updated \
+            --function-name "$LAMBDA_FUNCTION_NAME"
 
-        cat response.json
+      # Optional smoke test
+      - name: Smoke Test
+        run: |
+          aws lambda invoke \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --payload '{"bucket":"test-bucket","file":"test.csv"}' \
+            response.json
+
+          cat response.json
