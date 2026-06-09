@@ -55,7 +55,7 @@ jobs:
         run: |
           aws lambda invoke \
             --function-name "$LAMBDA_FUNCTION_NAME" \
-            --payload '{"bucket":"test-bucket","file":"test.csv"}' \
+            --payload '{"bucket":"filepipeline-092042969531-raw","file":"test.txt.txt"}' \
             response.json
 
           cat response.json
