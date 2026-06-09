@@ -55,6 +55,7 @@ jobs:
         run: |
           aws lambda invoke \
             --function-name "$LAMBDA_FUNCTION_NAME" \
+            --cli-binary-format raw-in-base64-out \
             --payload '{"bucket":"filepipeline-092042969531-raw","file":"test.txt.txt"}' \
             response.json
 
