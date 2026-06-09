@@ -1,84 +1,112 @@
 import json
 import boto3
+import csv
+import io
 import urllib.parse
-import logging
+from datetime import datetime
 
 s3 = boto3.client("s3")
-sns = boto3.client("sns")
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-SNS_TOPIC_ARN = "YOUR_SNS_TOPIC_ARN"
+CONFIG_BUCKET = "filepipeline-config"
+CONFIG_KEY = "config.json"
 
 
 def lambda_handler(event, context):
 
-    logger.info("Lambda triggered")
-    logger.info(json.dumps(event))
+    record = event["Records"][0]
 
-    try:
+    bucket = record["s3"]["bucket"]["name"]
+    key = urllib.parse.unquote_plus(record["s3"]["object"]["key"])
 
-        if "Records" in event and "s3" in event["Records"][0]:
+    config = load_config()
 
-            record = event["Records"][0]
-
-            bucket = record["s3"]["bucket"]["name"]
-            key = urllib.parse.unquote_plus(record["s3"]["object"]["key"])
-
-            process_file(bucket, key)
+    return process_file(bucket, key, config)
 
 
-        elif "Records" in event and "body" in event["Records"][0]:
+# -------------------------
+# LOAD CONFIG DYNAMICALLY
+# -------------------------
+def load_config():
 
-            for record in event["Records"]:
-                body = json.loads(record["body"])
+    obj = s3.get_object(
+        Bucket=CONFIG_BUCKET,
+        Key=CONFIG_KEY
+    )
 
-                bucket = body.get("bucket")
-                key = body.get("file") or body.get("key")
-
-                if bucket and key:
-                    process_file(bucket, key)
-
-
-        else:
-
-            bucket = event.get("bucket")
-            key = event.get("file") or event.get("key")
-
-            if bucket and key:
-                process_file(bucket, key)
-            else:
-                raise ValueError("Invalid event format")
-
-        return {"statusCode": 200, "body": "Success"}
-
-    except Exception as e:
-        logger.exception("FAILED")
-        send_failure_alert(str(e))
-
-        return {"statusCode": 500, "body": str(e)}
+    return json.loads(
+        obj["Body"].read().decode("utf-8")
+    )
 
 
-def process_file(bucket, key):
-
-    logger.info(f"Processing s3://{bucket}/{key}")
+# -------------------------
+# DYNAMIC PROCESSING ENGINE
+# -------------------------
+def process_file(bucket, key, config):
 
     obj = s3.get_object(Bucket=bucket, Key=key)
+
     content = obj["Body"].read().decode("utf-8")
 
-    logger.info(f"File size: {len(content)}")
+    reader = csv.DictReader(io.StringIO(content))
 
-    return True
+    rows = []
 
+    for row in reader:
 
-def send_failure_alert(message):
-
-    try:
-        sns.publish(
-            TopicArn=SNS_TOPIC_ARN,
-            Message=message,
-            Subject="Lambda Failure"
+        transformed = apply_transformations(
+            row,
+            config["csv"]["transformations"]
         )
-    except Exception as e:
-        logger.error(e)
+
+        transformed["processed_time"] = str(datetime.utcnow())
+
+        rows.append(transformed)
+
+    output = io.StringIO()
+
+    writer = csv.DictWriter(
+        output,
+        fieldnames=rows[0].keys()
+    )
+
+    writer.writeheader()
+    writer.writerows(rows)
+
+    output_key = f"processed/{key}"
+
+    s3.put_object(
+        Bucket="filepipeline-processed",
+        Key=output_key,
+        Body=output.getvalue()
+    )
+
+    return {
+        "rows": len(rows),
+        "output": output_key
+    }
+
+
+# -------------------------
+# GENERIC TRANSFORMATION ENGINE
+# -------------------------
+def apply_transformations(row, rules):
+
+    result = {}
+
+    for key, value in row.items():
+
+        if key in rules:
+
+            if rules[key] == "upper":
+                result[key] = value.upper()
+
+            elif rules[key] == "lower":
+                result[key] = value.lower()
+
+            else:
+                result[key] = value
+
+        else:
+            result[key] = value
+
+    return result
